@@ -1,74 +1,92 @@
-pub mod state;
+mod gfx_context;
 
-use state::State;
+use std::sync::Arc;
+
+use gfx_context::GfxContext;
 use winit::{
+    application::ApplicationHandler,
     dpi::LogicalSize,
-    event::*,
-    event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
+    event::WindowEvent,
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    window::{Window, WindowId},
 };
 
-pub async fn run() {
-    // Initialize the logger
-    env_logger::init();
+use anyhow::Result;
 
-    let event_loop = EventLoop::new();
-    let window = WindowBuilder::new()
-        .with_title("Mandelbrot Set")
-        .with_inner_size(LogicalSize::new(1920, 1080))
-        .build(&event_loop)
-        .unwrap();
+pub struct App {
+    window: Arc<Window>,
+    gfx_context: GfxContext,
+}
 
-    // Initialize the state
-    let mut state = State::new(window).await;
+pub enum AppHandler {
+    Running(App),
+    Initializing,
+}
 
-    // Run the event loop
-    event_loop.run(move |event, _, control_flow| match event {
-        Event::WindowEvent {
-            ref event,
-            window_id,
-        } if window_id == state.window.id() => {
-            if !state.input(event) {
-                match event {
-                    WindowEvent::CloseRequested
-                    | WindowEvent::KeyboardInput {
-                        input:
-                            KeyboardInput {
-                                state: ElementState::Pressed,
-                                virtual_keycode: Some(VirtualKeyCode::Escape),
-                                ..
-                            },
-                        ..
-                    } => *control_flow = ControlFlow::Exit,
-                    WindowEvent::Resized(physical_size) => {
-                        state.resize(*physical_size);
-                    }
-                    WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                        state.resize(**new_inner_size);
-                    }
-                    _ => {}
-                }
+impl App {
+    async fn new(window: Window) -> Result<Self> {
+        let window = Arc::new(window);
+        let gfx_context = GfxContext::new(Arc::clone(&window)).await?;
+
+        Ok(Self {
+            gfx_context,
+            window,
+        })
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, event: WindowEvent) {
+        use WindowEvent::*;
+
+        match event {
+            RedrawRequested => {
+                self.window.request_redraw();
+                self.gfx_context.render().expect("failed rendering")
             }
-        }
 
-        Event::RedrawRequested(window_id) if window_id == state.window.id() => {
-            state.update();
-            match state.render() {
-                Ok(_) => {}
-                // Reconfigure the surface if lost
-                Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
-                // The system is out of memory, we should probably quit
-                Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
-                // All other errors (Outdated, Timeout) should be resolved by the next frame
-                Err(e) => eprintln!("{:?}", e),
-            }
-        }
-        Event::MainEventsCleared => {
-            // RedrawRequested will only trigger once unless we manually
-            // request it.
-            state.window.request_redraw();
-        }
+            Resized(size) => self.gfx_context.resize(size),
 
-        _ => {}
-    });
+            CloseRequested => event_loop.exit(),
+
+            _ => {}
+        }
+    }
+}
+
+impl AppHandler {
+    pub fn new() -> Self {
+        Self::Initializing
+    }
+}
+
+impl ApplicationHandler for AppHandler {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        let window = event_loop
+            .create_window(
+                Window::default_attributes()
+                    .with_inner_size(LogicalSize::new(1920, 1080))
+                    .with_title("ray tracer"),
+            )
+            .expect("failed to create window");
+
+        let app = pollster::block_on(App::new(window)).expect("failed to initialize app");
+
+        *self = AppHandler::Running(app);
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+        let Self::Running(ref mut app) = self else {
+            return;
+        };
+
+        app.window_event(event_loop, event);
+    }
+}
+
+pub fn run() -> Result<()> {
+    let event_loop = EventLoop::new().unwrap();
+
+    event_loop.set_control_flow(ControlFlow::Poll);
+    event_loop.run_app(&mut AppHandler::new())?;
+
+    Ok(())
 }

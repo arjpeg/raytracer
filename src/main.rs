@@ -1,3 +1,3 @@
 fn main() {
-    pollster::block_on(mandelbrot::run());
+    raytracer::run().expect("failed to run app");
 }
