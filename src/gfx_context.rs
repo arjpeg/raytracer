@@ -164,7 +164,7 @@ impl GfxContext {
     }
 
     /// Renders the currently bound vertex buffer onto the `surface`.
-    pub fn render<'a>(&mut self) -> Result<()> {
+    pub fn render<'a>(&mut self) -> Result<(), SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output.texture.create_view(&TextureViewDescriptor {
             label: Some("Rendering View"),

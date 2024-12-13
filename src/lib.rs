@@ -35,17 +35,27 @@ impl App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, event: WindowEvent) {
-        use WindowEvent::*;
+        use wgpu::SurfaceError as SE;
+        use WindowEvent as WE;
 
         match event {
-            RedrawRequested => {
+            WE::RedrawRequested => {
                 self.window.request_redraw();
-                self.gfx_context.render().expect("failed rendering")
+
+                if let Err(e) = self.gfx_context.render() {
+                    match e {
+                        SE::Timeout => (),
+                        SE::OutOfMemory => panic!("out of memory!"),
+                        SE::Lost | SE::Outdated => {
+                            self.gfx_context.resize(self.window.inner_size())
+                        }
+                    }
+                };
             }
 
-            Resized(size) => self.gfx_context.resize(size),
+            WE::Resized(size) => self.gfx_context.resize(size),
 
-            CloseRequested => event_loop.exit(),
+            WE::CloseRequested => event_loop.exit(),
 
             _ => {}
         }
