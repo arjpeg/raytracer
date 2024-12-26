@@ -15,9 +15,22 @@ use crate::camera::Camera;
 pub struct RenderUniform {
     pub inverse_projection: glam::Mat4,
     pub inverse_view: glam::Mat4,
-    pub sphere_color: glam::Vec4,
     pub aspect_ratio: f32,
     pub _unused: [f32; 3],
+}
+
+#[derive(Debug, Clone)]
+pub struct Scene {
+    spheres: Vec<Sphere>,
+    size_changed: bool,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
+pub struct Sphere {
+    pub position: glam::Vec4,
+    pub color: glam::Vec3,
+    pub radius: f32,
 }
 
 pub struct GfxContext {
@@ -38,14 +51,19 @@ pub struct GfxContext {
     /// The main egui renderer.
     egui_renderer: egui_wgpu::Renderer,
 
+    render_data_bind_group: BindGroup,
+
     pub render_uniform: RenderUniform,
     render_uniform_buffer: Buffer,
-    render_uniform_bind_group: BindGroup,
+
+    /// A description of the scene to be rendered.
+    pub scene: Scene,
+    scene_storage_buffer: Buffer,
 }
 
 impl GfxContext {
     /// Creates a new renderer given a window as the surface.
-    pub async fn new(window: Arc<Window>) -> Result<Self> {
+    pub async fn new(window: Arc<Window>, camera: &Camera) -> Result<Self> {
         let instance = Instance::new(InstanceDescriptor {
             backends: Backends::all(),
             flags: InstanceFlags::empty(),
@@ -74,21 +92,42 @@ impl GfxContext {
         let aspect_ratio = size.width as f32 / size.height as f32;
 
         let render_uniform = RenderUniform {
-            inverse_projection: Mat4::IDENTITY,
-            inverse_view: Mat4::IDENTITY,
-            sphere_color: vec4(1.0, 0.0, 1.0, 0.0),
+            inverse_projection: camera.calculate_projection(aspect_ratio).inverse(),
+            inverse_view: camera.calculate_view().inverse(),
             aspect_ratio,
             _unused: [0.0; 3],
         };
+        let render_uniform_buffer = render_uniform.create_buffer(&device);
 
-        let (render_uniform_bind_group, render_uniform_bind_group_layout, render_uniform_buffer) =
-            render_uniform.create_buffers(&device);
+        let scene = Scene {
+            spheres: vec![
+                Sphere {
+                    position: vec4(1.0, 0.0, 0.0, 0.0),
+                    color: vec3(0.0, 0.9, 0.6),
+                    radius: 0.9,
+                },
+                Sphere {
+                    position: vec4(3.0, 0.0, 0.0, 0.0),
+                    color: vec3(0.6, 0.4, 0.6),
+                    radius: 0.5,
+                },
+            ],
+            size_changed: false,
+        };
+        let scene_storage_buffer = scene.create_buffer(&device);
+
+        let (render_data_bind_group, render_data_bind_group_layout) =
+            Self::create_render_data_bind_group(
+                &device,
+                &render_uniform_buffer,
+                &scene_storage_buffer,
+            );
 
         let pipeline = Self::create_pipeline(
             &device,
             &surface_config,
             device.create_shader_module(include_wgsl!("shader.wgsl")),
-            &[&render_uniform_bind_group_layout],
+            &[&render_data_bind_group_layout],
         );
 
         let egui_renderer =
@@ -102,9 +141,11 @@ impl GfxContext {
             surface,
             surface_config,
             egui_renderer,
+            render_data_bind_group,
             render_uniform,
-            render_uniform_bind_group,
             render_uniform_buffer,
+            scene,
+            scene_storage_buffer,
         })
     }
 
@@ -182,7 +223,7 @@ impl GfxContext {
             format: surface_format,
             width,
             height,
-            present_mode: PresentMode::Immediate,
+            present_mode: PresentMode::AutoVsync,
             desired_maximum_frame_latency: 2,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
@@ -210,6 +251,24 @@ impl GfxContext {
 
         self.render_uniform.inverse_projection = projection.inverse();
         self.render_uniform.inverse_view = view.inverse();
+
+        if self.scene.size_changed {
+            self.scene.size_changed = false;
+            self.scene_storage_buffer = self.scene.create_buffer(&self.device);
+
+            self.render_data_bind_group = Self::create_render_data_bind_group(
+                &self.device,
+                &self.render_uniform_buffer,
+                &self.scene_storage_buffer,
+            )
+            .0;
+        }
+
+        self.queue.write_buffer(
+            &self.scene_storage_buffer,
+            0,
+            bytemuck::cast_slice(&self.scene.spheres),
+        );
 
         self.queue.write_buffer(
             &self.render_uniform_buffer,
@@ -266,7 +325,7 @@ impl GfxContext {
         });
 
         render_pass.set_pipeline(&self.pipeline);
-        render_pass.set_bind_group(0, &self.render_uniform_bind_group, &[]);
+        render_pass.set_bind_group(0, &self.render_data_bind_group, &[]);
         render_pass.draw(0..6, 0..1);
     }
 
@@ -322,39 +381,113 @@ impl GfxContext {
             self.egui_renderer.free_texture(x)
         }
     }
-}
 
-impl RenderUniform {
-    fn create_buffers(&self, device: &Device) -> (BindGroup, BindGroupLayout, Buffer) {
-        let buffer = device.create_buffer_init(&BufferInitDescriptor {
-            label: Some("Render Uniform Buffer"),
-            contents: bytemuck::cast_slice(&[*self]),
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-        });
-
+    fn create_render_data_bind_group(
+        device: &Device,
+        uniform_buffer: &Buffer,
+        storage_buffer: &Buffer,
+    ) -> (BindGroup, BindGroupLayout) {
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("Render Uniform Bind Group Layout"),
-            entries: &[BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStages::FRAGMENT,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+            label: Some("Render Information Bind Group Layout"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
         });
 
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("Render Uniform Bind Group"),
+            label: Some("Render Information Bind Group"),
             layout: &bind_group_layout,
-            entries: &[BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: storage_buffer.as_entire_binding(),
+                },
+            ],
         });
 
-        (bind_group, bind_group_layout, buffer)
+        (bind_group, bind_group_layout)
+    }
+}
+
+impl RenderUniform {
+    fn create_buffer(&self, device: &Device) -> Buffer {
+        device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Render Uniform Buffer"),
+            contents: bytemuck::cast_slice(&[*self]),
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        })
+    }
+}
+
+#[allow(dead_code)]
+impl Scene {
+    fn create_buffer(&self, device: &Device) -> Buffer {
+        device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Scene Storage Buffer"),
+            contents: bytemuck::cast_slice(&self.spheres),
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+        })
+    }
+
+    pub fn add_sphere(&mut self, sphere: Sphere) {
+        self.spheres.push(sphere);
+        self.size_changed = true;
+    }
+
+    pub fn spheres(&self) -> &[Sphere] {
+        &self.spheres
+    }
+
+    pub fn spheres_mut(&mut self) -> &mut [Sphere] {
+        &mut self.spheres
+    }
+}
+
+impl Sphere {
+    pub fn random() -> Self {
+        use glam::{vec3, vec4};
+        use rand::Rng;
+
+        let mut rng = rand::thread_rng();
+
+        let position = vec4(
+            rng.gen_range(-5.0..5.0),
+            rng.gen_range(-5.0..5.0),
+            rng.gen_range(-5.0..5.0),
+            0.0,
+        );
+
+        let color = vec3(rng.gen(), rng.gen(), rng.gen());
+
+        let radius = rng.gen_range(0.3..1.2);
+
+        Self {
+            position,
+            color,
+            radius,
+        }
     }
 }

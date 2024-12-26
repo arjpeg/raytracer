@@ -1,6 +1,5 @@
 use std::{sync::Arc, time::Instant};
 
-use glam::vec3;
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -9,8 +8,12 @@ use winit::{
     window::{CursorGrabMode, Window, WindowId},
 };
 
-use crate::{camera::Camera, gfx_context::GfxContext};
 use anyhow::Result;
+
+use crate::{
+    camera::Camera,
+    gfx_context::{GfxContext, Sphere},
+};
 
 pub struct App {
     /// The main surface being displayed onto.
@@ -38,12 +41,14 @@ pub enum AppHandler {
 
 impl App {
     async fn new(window: Window) -> Result<Self> {
+        use glam::vec3;
+
         let window = Arc::new(window);
-        let gfx_context = GfxContext::new(Arc::clone(&window)).await?;
+
+        let camera = Camera::new_facing(vec3(0.0, 0.0, 4.0), vec3(-1.0, 0.0, 0.0));
+        let gfx_context = GfxContext::new(Arc::clone(&window), &camera).await?;
 
         let (egui_ctx, egui_state) = Self::initialize_egui(&window);
-
-        let camera = Camera::new_facing(vec3(-2.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0));
 
         Ok(Self {
             gfx_context,
@@ -67,52 +72,17 @@ impl App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, event: WindowEvent) {
-        use wgpu::SurfaceError as SE;
         use WindowEvent as WE;
 
         let response = self.egui_state.on_window_event(&self.window, &event);
 
-        if response.consumed {
+        if event != WE::RedrawRequested && response.consumed {
             return;
         }
 
         match event {
             WE::RedrawRequested => {
-                self.window.request_redraw();
-
-                let egui_output = self.ui();
-
-                self.egui_state
-                    .handle_platform_output(&self.window, egui_output.platform_output.clone());
-
-                self.dt = self.last_frame.elapsed().as_secs_f32();
-                self.last_frame = Instant::now();
-
-                self.gfx_context.update_buffers(&self.camera);
-
-                let hovering = self.egui_ctx.is_pointer_over_area();
-
-                self.egui_ctx.input(|i| {
-                    self.camera.handle_keyboard(i, self.dt);
-
-                    if !hovering && i.pointer.primary_down() {
-                        self.window.set_cursor_grab(CursorGrabMode::Locked).unwrap();
-                        self.window.set_cursor_visible(false);
-                    } else {
-                        self.window.set_cursor_grab(CursorGrabMode::None).unwrap();
-                        self.window.set_cursor_visible(true);
-                    }
-                });
-
-                if let Err(e) = self.gfx_context.render(&self.egui_ctx, egui_output) {
-                    match e {
-                        SE::Timeout => (),
-                        SE::OutOfMemory => panic!("out of memory!"),
-                        SE::Lost | SE::Outdated => {
-                            self.gfx_context.resize(self.window.inner_size())
-                        }
-                    }
-                };
+                self.update();
             }
 
             WE::Resized(size) => self.gfx_context.resize(size),
@@ -133,6 +103,44 @@ impl App {
         }
     }
 
+    fn update(&mut self) {
+        use wgpu::SurfaceError as SE;
+
+        let egui_output = self.ui();
+
+        self.egui_state
+            .handle_platform_output(&self.window, egui_output.platform_output.clone());
+
+        self.dt = self.last_frame.elapsed().as_secs_f32();
+        self.last_frame = Instant::now();
+
+        self.gfx_context.update_buffers(&self.camera);
+
+        let hovering = self.egui_ctx.is_pointer_over_area();
+
+        self.egui_ctx.input(|i| {
+            self.camera.handle_keyboard(i, self.dt);
+
+            if !hovering && i.pointer.primary_down() {
+                self.window.set_cursor_grab(CursorGrabMode::Locked).unwrap();
+                self.window.set_cursor_visible(false);
+            } else {
+                self.window.set_cursor_grab(CursorGrabMode::None).unwrap();
+                self.window.set_cursor_visible(true);
+            }
+        });
+
+        if let Err(e) = self.gfx_context.render(&self.egui_ctx, egui_output) {
+            match e {
+                SE::Timeout => (),
+                SE::OutOfMemory => panic!("out of memory!"),
+                SE::Lost | SE::Outdated => self.gfx_context.resize(self.window.inner_size()),
+            }
+        };
+
+        self.window.request_redraw();
+    }
+
     fn ui(&mut self) -> egui::FullOutput {
         use egui::*;
 
@@ -141,6 +149,12 @@ impl App {
         self.egui_ctx.run(raw_input, |ctx| {
             Window::new("render info").show(ctx, |ui| {
                 ui.label(&format!("frame time: {:0.3}", self.dt * 1000.0));
+
+                ui.separator();
+
+                if ui.button("add sphere to scene").clicked() {
+                    self.gfx_context.scene.add_sphere(Sphere::random());
+                }
 
                 ui.separator();
 
@@ -155,23 +169,41 @@ impl App {
 
                 ui.horizontal(|ui| {
                     ui.label("camera forward: ");
-                    ui.add(DragValue::new(&mut self.camera.yaw).speed(0.01));
-                    ui.add(DragValue::new(&mut self.camera.pitch).speed(0.01));
+                    ui.add(DragValue::new(&mut self.camera.yaw).speed(0.1));
+                    ui.add(DragValue::new(&mut self.camera.pitch).speed(0.1));
                 });
 
                 ui.separator();
 
-                ui.horizontal(|ui| {
-                    let color = &mut self.gfx_context.render_uniform.sphere_color;
-                    let mut color_array = color.truncate().to_array();
+                for sphere in self.gfx_context.scene.spheres_mut() {
+                    ui.horizontal(|ui| {
+                        let position = &mut sphere.position;
 
-                    ui.label("sphere color: ");
-                    ui.color_edit_button_rgb(&mut color_array);
+                        ui.label("position: ");
+                        ui.add(DragValue::new(&mut position.x).speed(0.01));
+                        ui.add(DragValue::new(&mut position.y).speed(0.01));
+                        ui.add(DragValue::new(&mut position.z).speed(0.01));
+                    });
 
-                    color.x = color_array[0];
-                    color.y = color_array[1];
-                    color.z = color_array[2];
-                });
+                    ui.horizontal(|ui| {
+                        ui.label("radius: ");
+                        ui.add(DragValue::new(&mut sphere.radius).speed(0.01));
+                    });
+
+                    ui.horizontal(|ui| {
+                        let color = &mut sphere.color;
+                        let mut color_array = color.to_array();
+
+                        ui.label("albedo: ");
+                        ui.color_edit_button_rgb(&mut color_array);
+
+                        color.x = color_array[0];
+                        color.y = color_array[1];
+                        color.z = color_array[2];
+                    });
+
+                    ui.separator();
+                }
             });
         })
     }
