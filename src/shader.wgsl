@@ -66,8 +66,13 @@ fn per_pixel(coord: vec2<f32>) -> vec3<f32> {
     }
 
     let t = (-b - sqrt(discriminant)) / (2.0 * a);
+
+    if t < 0 {
+        return vec3<f32>(0.0);
+    }
+
     let hit_postion = ray_origin + ray_direction * t;
     let normal = normalize(hit_postion - sphere_origin);
 
-    return max(dot(normal, -light_direction), 0.0) * sphere_color;
+    return max(dot(normal, -light_direction), 0.1) * sphere_color;
 }

@@ -8,7 +8,7 @@ use winit::{dpi::PhysicalSize, window::Window};
 
 use anyhow::Result;
 
-use crate::app::Camera;
+use crate::camera::Camera;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]

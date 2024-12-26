@@ -1,10 +1,6 @@
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{sync::Arc, time::Instant};
 
-use egui::{InputState, Modifiers};
-use glam::{vec3, Mat4, Vec3};
+use glam::vec3;
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -13,7 +9,7 @@ use winit::{
     window::{CursorGrabMode, Window, WindowId},
 };
 
-use crate::gfx_context::GfxContext;
+use crate::{camera::Camera, gfx_context::GfxContext};
 use anyhow::Result;
 
 pub struct App {
@@ -40,14 +36,6 @@ pub enum AppHandler {
     Initializing,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Camera {
-    pub eye: glam::Vec3,
-    pub forward: glam::Vec3,
-    pub yaw: f32,
-    pub pitch: f32,
-}
-
 impl App {
     async fn new(window: Window) -> Result<Self> {
         let window = Arc::new(window);
@@ -55,12 +43,7 @@ impl App {
 
         let (egui_ctx, egui_state) = Self::initialize_egui(&window);
 
-        let camera = Camera {
-            eye: vec3(0.0, 0.0, 2.0),
-            forward: vec3(0.0, 0.0, -1.0),
-            yaw: 270.0,
-            pitch: 0.0,
-        };
+        let camera = Camera::new_facing(vec3(-2.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0));
 
         Ok(Self {
             gfx_context,
@@ -231,70 +214,5 @@ impl ApplicationHandler for AppHandler {
         };
 
         app.device_event(event);
-    }
-}
-
-impl Camera {
-    pub fn calculate_projection(&self, aspect_ratio: f32) -> Mat4 {
-        Mat4::perspective_rh(45.0f32.to_radians(), aspect_ratio, 0.1, 1000.0)
-    }
-
-    pub fn calculate_view(&self) -> Mat4 {
-        Mat4::look_to_rh(self.eye, self.forward.normalize(), Vec3::Y)
-    }
-
-    fn handle_keyboard(&mut self, input: &InputState, dt: f32) {
-        use egui::Key;
-
-        let forward = self.forward;
-        let right = forward.cross(Vec3::Y);
-
-        let mut delta_pos = Vec3::ZERO;
-
-        if input.key_down(Key::W) {
-            delta_pos += forward;
-        }
-        if input.key_down(Key::S) {
-            delta_pos -= forward;
-        }
-        if input.key_down(Key::D) {
-            delta_pos += right;
-        }
-        if input.key_down(Key::A) {
-            delta_pos -= right;
-        }
-
-        if input.key_down(Key::Space) {
-            delta_pos += Vec3::Y;
-        }
-
-        if input.modifiers.contains(Modifiers::SHIFT) {
-            delta_pos -= Vec3::Y;
-        }
-
-        delta_pos = delta_pos.normalize_or_zero();
-        let speed = 5.0;
-        self.eye += speed * dt * delta_pos;
-    }
-
-    fn handle_mouse(&mut self, input: &InputState, delta: (f64, f64)) {
-        if input.pointer.primary_down() {
-            let mouse_sensitivity = 0.1;
-
-            let dx = delta.0 as f32 * mouse_sensitivity;
-            let dy = delta.1 as f32 * mouse_sensitivity;
-
-            self.yaw += dx;
-            self.pitch -= dy;
-
-            self.pitch = self.pitch.clamp(-89.0, 89.0);
-        }
-
-        self.forward = vec3(
-            self.yaw.to_radians().cos() * self.pitch.to_radians().cos(),
-            self.pitch.to_radians().sin(),
-            self.yaw.to_radians().sin() * self.pitch.to_radians().cos(),
-        )
-        .normalize();
     }
 }

@@ -1,4 +1,5 @@
 mod app;
+mod camera;
 mod gfx_context;
 
 use anyhow::Result;
