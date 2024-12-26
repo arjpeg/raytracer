@@ -8,20 +8,16 @@ use winit::{dpi::PhysicalSize, window::Window};
 
 use anyhow::Result;
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
-pub struct RenderUniform {
-    pub camera: Camera,
-    pub sphere_color: glam::Vec4,
-    pub aspect_ratio: f32,
-    pub _unused: [f32; 3],
-}
+use crate::app::Camera;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
-pub struct Camera {
-    pub eye: glam::Vec4,
-    pub target: glam::Vec4,
+pub struct RenderUniform {
+    pub inverse_projection: glam::Mat4,
+    pub inverse_view: glam::Mat4,
+    pub sphere_color: glam::Vec4,
+    pub aspect_ratio: f32,
+    pub _unused: [f32; 3],
 }
 
 pub struct GfxContext {
@@ -75,14 +71,13 @@ impl GfxContext {
         surface.configure(&device, &surface_config);
 
         let size = window.inner_size();
+        let aspect_ratio = size.width as f32 / size.height as f32;
 
         let render_uniform = RenderUniform {
-            camera: Camera {
-                eye: vec4(0.0, 0.0, 2.0, 0.0),
-                target: vec4(1.0, 0.0, 1.0, 0.0),
-            },
+            inverse_projection: Mat4::IDENTITY,
+            inverse_view: Mat4::IDENTITY,
             sphere_color: vec4(1.0, 0.0, 1.0, 0.0),
-            aspect_ratio: size.width as f32 / size.height as f32,
+            aspect_ratio,
             _unused: [0.0; 3],
         };
 
@@ -209,7 +204,13 @@ impl GfxContext {
         self.render_uniform.aspect_ratio = width as f32 / height as f32;
     }
 
-    pub fn update_buffers(&mut self) {
+    pub fn update_buffers(&mut self, camera: &Camera) {
+        let projection = camera.calculate_projection(self.render_uniform.aspect_ratio);
+        let view = camera.calculate_view();
+
+        self.render_uniform.inverse_projection = projection.inverse();
+        self.render_uniform.inverse_view = view.inverse();
+
         self.queue.write_buffer(
             &self.render_uniform_buffer,
             0,

@@ -1,13 +1,10 @@
 struct RenderUniform {
-	camera: Camera,
+	inverse_projection: mat4x4<f32>,
+	inverse_view: mat4x4<f32>,
 	sphere_color: vec4<f32>,
 	aspect_ratio: f32,
 }
 
-struct Camera {
-	eye: vec4<f32>,
-	forward: vec4<f32>,
-}
 
 @group(0) @binding(0)
 var<uniform> render_info: RenderUniform;
@@ -40,15 +37,16 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    var coord = in.position.xy;
-    coord.x *= render_info.aspect_ratio;
+    let coord = in.position.xy;
 
     return vec4<f32>(per_pixel(coord), 1.0);
 }
 
 fn per_pixel(coord: vec2<f32>) -> vec3<f32> {
-    let ray_origin = vec3<f32>(0.0, 0.0, 2.0);
-    let ray_direction = vec3<f32>(coord, -1.0);
+    let ray_origin = render_info.inverse_view[3].xyz;
+
+    let ray_target = render_info.inverse_projection * vec4<f32>(coord, 1.0, 1.0);
+    let ray_direction = (render_info.inverse_view * vec4<f32>(normalize(ray_target.xyz / ray_target.w), 0.0)).xyz;
 
     let sphere_color = render_info.sphere_color.xyz;
     let sphere_origin = vec3<f32>(0.0);
