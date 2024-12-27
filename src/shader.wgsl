@@ -70,14 +70,37 @@ fn per_pixel(coord: vec2<f32>) -> vec4<f32> {
     let target_ = render_info.inverse_projection * vec4<f32>(coord, 1.0, 1.0);
     let direction = (inverse_view * vec4<f32>(normalize(target_.xyz / target_.w), 0.0)).xyz; // cast into world space
 
-    let ray = Ray(origin, direction);
-    let hit = trace_ray(ray);
+    var ray = Ray(origin, direction);
+    let bounces = 2;
 
-    if hit.hit_distance == -1.0 {
-        return vec4<f32>(0.0);
+    var color = vec3<f32>(0.0);
+    var multiplier = 1.0;
+
+
+    let light_direction = normalize(vec3<f32>(-1.0));
+
+    for (var i = 0; i < bounces; i++) {
+        let hit = trace_ray(ray);
+
+        if hit.hit_distance < 0.0 {
+            let sky_color = vec3<f32>(0.0);
+            color += sky_color * multiplier;
+						break;
+        }
+
+        let sphere = scene.spheres[hit.object_index];
+
+        let light_intensity = max(dot(hit.normal, -light_direction), 0.01);
+
+        color += sphere.albedo * light_intensity;
+
+        ray.origin = hit.position + hit.normal * 0.001;
+        ray.direction = hit.normal;
+
+        multiplier *= 0.7;
     }
 
-    return vec4<f32>(scene.spheres[hit.object_index].albedo, 1.0);
+    return vec4<f32>(color, 1.0);
 }
 
 fn trace_ray(ray: Ray) -> HitPayload {

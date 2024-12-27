@@ -103,12 +103,12 @@ impl GfxContext {
             spheres: vec![
                 Sphere {
                     position: vec4(1.0, 0.0, 0.0, 0.0),
-                    color: vec3(0.0, 0.9, 0.6),
+                    color: vec3(0.0, 0.0, 1.0),
                     radius: 0.9,
                 },
                 Sphere {
                     position: vec4(3.0, 0.0, 0.0, 0.0),
-                    color: vec3(0.6, 0.4, 0.6),
+                    color: vec3(0.2, 0.4, 0.6),
                     radius: 0.5,
                 },
             ],
