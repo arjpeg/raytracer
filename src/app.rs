@@ -1,5 +1,6 @@
 use std::{sync::Arc, time::Instant};
 
+use glam::Vec3;
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -45,7 +46,7 @@ impl App {
 
         let window = Arc::new(window);
 
-        let camera = Camera::new_facing(vec3(0.0, 1.0, 4.0), vec3(-1.0, 0.2, 0.0));
+        let camera = Camera::new_facing(vec3(0.0, 1.0, 4.0), Vec3::NEG_Z);
         let gfx_context = GfxContext::new(Arc::clone(&window), &camera).await?;
 
         let (egui_ctx, egui_state) = Self::initialize_egui(&window);

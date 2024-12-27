@@ -6,8 +6,6 @@ use glam::{Mat4, Vec3};
 pub struct Camera {
     /// The position.
     pub eye: glam::Vec3,
-    /// The heading direction.
-    pub forward: glam::Vec3,
 
     /// The euler angle defining rotation around the y axis.
     pub yaw: f32,
@@ -16,18 +14,26 @@ pub struct Camera {
 }
 
 impl Camera {
-    pub fn new_facing(position: Vec3, direction: Vec3) -> Self {
-        let direction = direction.normalize();
+    pub fn new_facing(position: Vec3, forward: Vec3) -> Self {
+        let Vec3 { x, y, z } = forward.normalize();
 
-        let yaw = f32::atan2(direction.x, direction.z).to_degrees();
-        let pitch = (-direction.y).asin().to_degrees();
+        let pitch = y.asin().to_degrees();
+        let yaw = f32::atan2(z, x).to_degrees();
 
         Self {
             eye: position,
-            forward: direction,
             yaw,
             pitch,
         }
+    }
+
+    pub fn forward(&self) -> Vec3 {
+        Vec3::new(
+            self.yaw.to_radians().cos() * self.pitch.to_radians().cos(),
+            self.pitch.to_radians().sin(),
+            self.yaw.to_radians().sin() * self.pitch.to_radians().cos(),
+        )
+        .normalize()
     }
 
     pub fn calculate_projection(&self, aspect_ratio: f32) -> Mat4 {
@@ -35,13 +41,13 @@ impl Camera {
     }
 
     pub fn calculate_view(&self) -> Mat4 {
-        Mat4::look_to_rh(self.eye, self.forward.normalize(), Vec3::Y)
+        Mat4::look_to_rh(self.eye, self.forward().normalize(), Vec3::Y)
     }
 
     pub fn handle_keyboard(&mut self, input: &InputState, dt: f32) {
         use egui::Key;
 
-        let forward = self.forward;
+        let forward = self.forward();
         let right = forward.cross(Vec3::Y);
 
         let mut delta_pos = Vec3::ZERO;
@@ -84,12 +90,5 @@ impl Camera {
 
             self.pitch = self.pitch.clamp(-89.0, 89.0);
         }
-
-        self.forward = Vec3::new(
-            self.yaw.to_radians().cos() * self.pitch.to_radians().cos(),
-            self.pitch.to_radians().sin(),
-            self.yaw.to_radians().sin() * self.pitch.to_radians().cos(),
-        )
-        .normalize();
     }
 }
