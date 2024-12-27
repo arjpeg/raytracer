@@ -33,6 +33,9 @@ pub struct App {
     dt: f32,
     /// The time of the last frame.
     last_frame: Instant,
+
+    /// If the `window` currently has focus over the cursor.
+    focused: bool,
 }
 
 pub enum AppHandler {
@@ -59,6 +62,7 @@ impl App {
             egui_ctx,
             dt: 0.0,
             last_frame: Instant::now(),
+            focused: false,
         })
     }
 
@@ -120,14 +124,18 @@ impl App {
         let hovering = self.egui_ctx.is_pointer_over_area();
 
         self.egui_ctx.input(|i| {
-            self.camera.handle_keyboard(i, self.dt);
-
             if !hovering && i.pointer.primary_down() {
                 self.window.set_cursor_grab(CursorGrabMode::Locked).unwrap();
                 self.window.set_cursor_visible(false);
+                self.focused = true;
             } else {
                 self.window.set_cursor_grab(CursorGrabMode::None).unwrap();
                 self.window.set_cursor_visible(true);
+                self.focused = false;
+            }
+
+            if self.focused {
+                self.camera.handle_keyboard(i, self.dt);
             }
         });
 
@@ -179,6 +187,20 @@ impl App {
 
                 ui.separator();
 
+                ui.horizontal(|ui| {
+                    let color = &mut self.gfx_context.render_uniform.sky_color;
+                    let mut color_array = color.to_array();
+
+                    ui.label("sky color: ");
+                    ui.color_edit_button_rgb(&mut color_array);
+
+                    color.x = color_array[0];
+                    color.y = color_array[1];
+                    color.z = color_array[2];
+                });
+
+                ui.separator();
+
                 if ui.button("add sphere to scene").clicked() {
                     self.gfx_context.scene.add_sphere(Sphere::random());
                 }
@@ -198,6 +220,11 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.label("radius: ");
                         ui.add(DragValue::new(&mut sphere.radius).speed(0.01));
+                    });
+
+                    ui.horizontal_top(|ui| {
+                        ui.label("roughness: ");
+                        ui.add(Slider::new(&mut sphere.roughness, 0.0..=1.0));
                     });
 
                     ui.horizontal(|ui| {

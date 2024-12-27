@@ -17,6 +17,8 @@ pub struct RenderUniform {
     pub inverse_view: glam::Mat4,
     pub light_direction: glam::Vec3,
     pub aspect_ratio: f32,
+    pub sky_color: glam::Vec3,
+    pub time: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -31,6 +33,8 @@ pub struct Sphere {
     pub position: glam::Vec4,
     pub color: glam::Vec3,
     pub radius: f32,
+    pub roughness: f32,
+    pub _unused: [u8; 12],
 }
 
 pub struct GfxContext {
@@ -97,11 +101,22 @@ impl GfxContext {
                     position: vec4(0.0, -12.0, 0.0, 0.0),
                     color: vec3(0.0, 0.0, 1.0),
                     radius: 12.0,
+                    roughness: 0.3,
+                    _unused: [0; 12],
                 },
                 Sphere {
-                    position: vec4(0.0, 0.7, 0.0, 0.0),
-                    color: vec3(0.2, 0.4, 0.6),
+                    position: vec4(0.0, 0.6, 0.0, 0.0),
+                    color: vec3(1.0, 1.0, 1.0),
                     radius: 0.5,
+                    roughness: 0.7,
+                    _unused: [0; 12],
+                },
+                Sphere {
+                    position: vec4(-2.61, 0.0, 3.91, 0.0),
+                    color: vec3(1.0, 0.0, 0.0),
+                    radius: 2.75,
+                    roughness: 0.7,
+                    _unused: [0; 12],
                 },
             ],
             size_changed: false,
@@ -243,6 +258,8 @@ impl GfxContext {
 
         self.render_uniform.inverse_projection = projection.inverse();
         self.render_uniform.inverse_view = view.inverse();
+
+        self.render_uniform.time += 0.01;
 
         if self.scene.size_changed {
             self.scene.size_changed = false;
@@ -431,8 +448,10 @@ impl RenderUniform {
         Self {
             inverse_projection: camera.calculate_projection(aspect_ratio).inverse(),
             inverse_view: camera.calculate_view().inverse(),
-            light_direction: vec3(-1.0, -1.0, -1.0).normalize(),
+            light_direction: vec3(0.0, -1.0, 0.0).normalize(),
             aspect_ratio,
+            sky_color: vec3(0.190, 0.462, 0.709),
+            time: 0.0,
         }
     }
 
@@ -487,10 +506,14 @@ impl Sphere {
 
         let radius = rng.gen_range(0.3..1.2);
 
+        let roughness = rng.gen();
+
         Self {
             position,
             color,
             radius,
+            roughness,
+            _unused: [0; 12],
         }
     }
 }

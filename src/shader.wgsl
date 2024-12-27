@@ -3,6 +3,8 @@ struct RenderUniform {
 	inverse_view: mat4x4<f32>,
 	light_direction: vec3<f32>,
 	aspect_ratio: f32,
+	sky_color: vec3<f32>,
+	time: f32,
 }
 
 struct Scene {
@@ -13,6 +15,7 @@ struct Sphere {
 	position: vec4<f32>,
 	albedo: vec3<f32>,
 	radius: f32,
+	roughness: f32,
 }
 
 @group(0) @binding(0)
@@ -69,33 +72,36 @@ fn per_pixel(coord: vec2<f32>) -> vec4<f32> {
 
     let origin = inverse_view[3].xyz;
     let target_ = render_info.inverse_projection * vec4<f32>(coord, 1.0, 1.0);
-    let direction = (inverse_view * vec4<f32>(normalize(target_.xyz / target_.w), 0.0)).xyz; // cast into world space
+		// cast into world space
+    let direction = (inverse_view * vec4<f32>(normalize(target_.xyz / target_.w), 0.0)).xyz;
 
     var ray = Ray(origin, direction);
-    let bounces = 2;
+    let bounces = 5;
 
     var color = vec3<f32>(0.0);
     var multiplier = 1.0;
+
+    var rng = initial_seed(coord);
 
     for (var i = 0; i < bounces; i++) {
         let hit = trace_ray(ray);
 
         if hit.hit_distance < 0.0 {
-            let sky_color = vec3<f32>(0.0);
-            color += sky_color * multiplier;
+            color += render_info.sky_color * multiplier;
 						break;
         }
 
         let sphere = scene.spheres[hit.object_index];
 
         let light_intensity = max(dot(hit.normal, -normalize(render_info.light_direction)), 0.01);
-
         color += sphere.albedo * light_intensity;
 
-        ray.origin = hit.position + hit.normal * 0.001;
-        ray.direction = hit.normal;
+        let scatter_direction = next_random_vec3(&rng) - vec3<f32>(0.5);
 
-        multiplier *= 0.7;
+        ray.origin = hit.position + hit.normal * 0.0001;
+        ray.direction = reflect(ray.direction, hit.normal + sphere.roughness * scatter_direction);
+
+        multiplier *= 0.5;
     }
 
     return vec4<f32>(color, 1.0);
@@ -156,4 +162,31 @@ fn miss(ray: Ray) -> HitPayload {
     payload.hit_distance = -1.0;
 
     return payload;
+}
+
+fn initial_seed(coord: vec2<f32>) -> u32 {
+    let translated = coord * 0.5 + 0.5;
+    let x = translated.x * 1000.0;
+    let y = translated.y * 1000.0;
+    let t = pow(render_info.time, 2.0) * 1000.0;
+
+    return u32(x) ^ (u32(y) << 16u) ^ u32(t);
+}
+
+fn next_random(rng: ptr<function, u32>) -> f32 {
+    (*rng) = (*rng) ^ ((*rng) >> 16u);
+    (*rng) = (*rng) * 0x85ebca6bu;
+    (*rng) = (*rng) ^ ((*rng) >> 13u);
+    (*rng) = (*rng) * 0xc2b2ae35u;
+    (*rng) = (*rng) ^ ((*rng) >> 16u);
+
+    return f32((*rng) & 0x007fffffu) / f32(0x00800000u);
+}
+
+fn next_random_vec3(rng: ptr<function, u32>) -> vec3<f32> {
+    let x = next_random(rng);
+    let y = next_random(rng);
+    let z = next_random(rng);
+
+    return vec3<f32>(x, y, z);
 }
