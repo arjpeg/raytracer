@@ -1,6 +1,7 @@
 struct RenderUniform {
 	inverse_projection: mat4x4<f32>,
 	inverse_view: mat4x4<f32>,
+	light_direction: vec3<f32>,
 	aspect_ratio: f32,
 }
 
@@ -76,9 +77,6 @@ fn per_pixel(coord: vec2<f32>) -> vec4<f32> {
     var color = vec3<f32>(0.0);
     var multiplier = 1.0;
 
-
-    let light_direction = normalize(vec3<f32>(-1.0));
-
     for (var i = 0; i < bounces; i++) {
         let hit = trace_ray(ray);
 
@@ -90,7 +88,7 @@ fn per_pixel(coord: vec2<f32>) -> vec4<f32> {
 
         let sphere = scene.spheres[hit.object_index];
 
-        let light_intensity = max(dot(hit.normal, -light_direction), 0.01);
+        let light_intensity = max(dot(hit.normal, -normalize(render_info.light_direction)), 0.01);
 
         color += sphere.albedo * light_intensity;
 

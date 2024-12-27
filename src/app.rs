@@ -45,7 +45,7 @@ impl App {
 
         let window = Arc::new(window);
 
-        let camera = Camera::new_facing(vec3(0.0, 0.0, 4.0), vec3(-1.0, 0.0, 0.0));
+        let camera = Camera::new_facing(vec3(0.0, 1.0, 4.0), vec3(-1.0, 0.2, 0.0));
         let gfx_context = GfxContext::new(Arc::clone(&window), &camera).await?;
 
         let (egui_ctx, egui_state) = Self::initialize_egui(&window);
@@ -152,12 +152,6 @@ impl App {
 
                 ui.separator();
 
-                if ui.button("add sphere to scene").clicked() {
-                    self.gfx_context.scene.add_sphere(Sphere::random());
-                }
-
-                ui.separator();
-
                 ui.horizontal(|ui| {
                     let eye = &mut self.camera.eye;
 
@@ -172,6 +166,21 @@ impl App {
                     ui.add(DragValue::new(&mut self.camera.yaw).speed(0.1));
                     ui.add(DragValue::new(&mut self.camera.pitch).speed(0.1));
                 });
+
+                ui.horizontal(|ui| {
+                    let direction = &mut self.gfx_context.render_uniform.light_direction;
+
+                    ui.label("light direction: ");
+                    ui.add(DragValue::new(&mut direction.x).speed(0.01));
+                    ui.add(DragValue::new(&mut direction.y).speed(0.01));
+                    ui.add(DragValue::new(&mut direction.z).speed(0.01));
+                });
+
+                ui.separator();
+
+                if ui.button("add sphere to scene").clicked() {
+                    self.gfx_context.scene.add_sphere(Sphere::random());
+                }
 
                 ui.separator();
 

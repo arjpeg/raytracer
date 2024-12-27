@@ -15,8 +15,8 @@ use crate::camera::Camera;
 pub struct RenderUniform {
     pub inverse_projection: glam::Mat4,
     pub inverse_view: glam::Mat4,
+    pub light_direction: glam::Vec3,
     pub aspect_ratio: f32,
-    pub _unused: [f32; 3],
 }
 
 #[derive(Debug, Clone)]
@@ -88,26 +88,18 @@ impl GfxContext {
         let surface_config = Self::get_surface_config(&adapter, &surface, window.inner_size());
         surface.configure(&device, &surface_config);
 
-        let size = window.inner_size();
-        let aspect_ratio = size.width as f32 / size.height as f32;
-
-        let render_uniform = RenderUniform {
-            inverse_projection: camera.calculate_projection(aspect_ratio).inverse(),
-            inverse_view: camera.calculate_view().inverse(),
-            aspect_ratio,
-            _unused: [0.0; 3],
-        };
+        let render_uniform = RenderUniform::new(window.inner_size(), camera);
         let render_uniform_buffer = render_uniform.create_buffer(&device);
 
         let scene = Scene {
             spheres: vec![
                 Sphere {
-                    position: vec4(1.0, 0.0, 0.0, 0.0),
+                    position: vec4(0.0, -12.0, 0.0, 0.0),
                     color: vec3(0.0, 0.0, 1.0),
-                    radius: 0.9,
+                    radius: 12.0,
                 },
                 Sphere {
-                    position: vec4(3.0, 0.0, 0.0, 0.0),
+                    position: vec4(0.0, 0.7, 0.0, 0.0),
                     color: vec3(0.2, 0.4, 0.6),
                     radius: 0.5,
                 },
@@ -433,6 +425,17 @@ impl GfxContext {
 }
 
 impl RenderUniform {
+    fn new(size: PhysicalSize<u32>, camera: &Camera) -> Self {
+        let aspect_ratio = size.width as f32 / size.height as f32;
+
+        Self {
+            inverse_projection: camera.calculate_projection(aspect_ratio).inverse(),
+            inverse_view: camera.calculate_view().inverse(),
+            light_direction: vec3(-1.0, -1.0, -1.0).normalize(),
+            aspect_ratio,
+        }
+    }
+
     fn create_buffer(&self, device: &Device) -> Buffer {
         device.create_buffer_init(&BufferInitDescriptor {
             label: Some("Render Uniform Buffer"),
