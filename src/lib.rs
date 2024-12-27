@@ -14,8 +14,6 @@ pub fn run() -> Result<()> {
         .filter_module("raytracer", LevelFilter::Debug)
         .init();
 
-    log::debug!("hello??");
-
     let event_loop = EventLoop::new().unwrap();
 
     event_loop.set_control_flow(ControlFlow::Poll);

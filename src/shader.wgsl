@@ -10,7 +10,7 @@ struct Scene {
 
 struct Sphere {
 	position: vec4<f32>,
-	color: vec3<f32>,
+	albedo: vec3<f32>,
 	radius: f32,
 }
 
@@ -48,27 +48,49 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let coord = in.position.xy;
-
-    return vec4<f32>(per_pixel(coord), 1.0);
+    return per_pixel(in.position.xy);
 }
 
-fn per_pixel(coord: vec2<f32>) -> vec3<f32> {
-    let ray_origin = render_info.inverse_view[3].xyz;
+struct Ray {
+	origin: vec3<f32>,
+	direction: vec3<f32>,
+}
 
-    let ray_target = render_info.inverse_projection * vec4<f32>(coord, 1.0, 1.0);
-    let ray_direction = (render_info.inverse_view * vec4<f32>(normalize(ray_target.xyz / ray_target.w), 0.0)).xyz;
+struct HitPayload {
+	hit_distance: f32,
+	position: vec3<f32>,
+	normal: vec3<f32>,
+	object_index: u32
+}
 
+fn per_pixel(coord: vec2<f32>) -> vec4<f32> {
+    let inverse_view = render_info.inverse_view;
+
+    let origin = inverse_view[3].xyz;
+    let target_ = render_info.inverse_projection * vec4<f32>(coord, 1.0, 1.0);
+    let direction = (inverse_view * vec4<f32>(normalize(target_.xyz / target_.w), 0.0)).xyz; // cast into world space
+
+    let ray = Ray(origin, direction);
+    let hit = trace_ray(ray);
+
+    if hit.hit_distance == -1.0 {
+        return vec4<f32>(0.0);
+    }
+
+    return vec4<f32>(scene.spheres[hit.object_index].albedo, 1.0);
+}
+
+fn trace_ray(ray: Ray) -> HitPayload {
     var closest_sphere = -1;
     var hit_distance = bitcast<f32>(0x7f800000);
 
     for (var i = 0; i < i32(arrayLength(&scene.spheres)); i++) {
         let sphere = scene.spheres[i];
 
-        let origin = ray_origin - sphere.position.xyz;
+        let origin = ray.origin - sphere.position.xyz;
 
-        let a = dot(ray_direction, ray_direction);
-        let b = 2.0 * dot(origin, ray_direction);
+        let a = dot(ray.direction, ray.direction);
+        let b = 2.0 * dot(origin, ray.direction);
         let c = dot(origin, origin) - sphere.radius * sphere.radius;
 
         let discriminant = (b * b) - (4.0 * a * c);
@@ -85,10 +107,32 @@ fn per_pixel(coord: vec2<f32>) -> vec3<f32> {
         }
     }
 
-    let sphere = scene.spheres[closest_sphere];
+    if closest_sphere == -1 {
+        return miss(ray);
+    }
 
-    let hit_postion = (ray_origin + sphere.position.xyz) + (ray_direction * hit_distance);
-    let normal = normalize(hit_postion - sphere.position.xyz);
+    return closest_hit(ray, hit_distance, u32(closest_sphere));
+}
 
-    return sphere.color;
+fn closest_hit(ray: Ray, hit_distance: f32, object_index: u32) -> HitPayload {
+    var payload: HitPayload;
+
+    payload.hit_distance = hit_distance;
+    payload.object_index = object_index;
+
+    let sphere = scene.spheres[object_index];
+    let origin = ray.origin - sphere.position.xyz;
+
+    payload.position = origin + ray.direction * hit_distance;
+    payload.normal = normalize(payload.position);
+    payload.position += sphere.position.xyz;
+
+    return payload;
+}
+
+fn miss(ray: Ray) -> HitPayload {
+    var payload: HitPayload;
+    payload.hit_distance = -1.0;
+
+    return payload;
 }
