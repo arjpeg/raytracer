@@ -119,7 +119,7 @@ impl App {
         self.dt = self.last_frame.elapsed().as_secs_f32();
         self.last_frame = Instant::now();
 
-        self.gfx_context.update_buffers(&self.camera);
+        self.gfx_context.update_buffers(&mut self.camera);
 
         let hovering = self.egui_ctx.is_pointer_over_area();
 
@@ -201,6 +201,20 @@ impl App {
 
                 ui.separator();
 
+                ui.horizontal(|ui| {
+                    ui.label("accumulate: ");
+
+                    let accumulate = &mut self.gfx_context.render_uniform.accumulate;
+                    let prev = *accumulate;
+                    ui.checkbox(accumulate, "");
+
+                    if *accumulate != prev {
+                        self.gfx_context.reset_accumulation();
+                    }
+                });
+            });
+
+            Window::new("scene").show(ctx, |ui| {
                 if ui.button("add sphere to scene").clicked() {
                     self.gfx_context.scene.add_sphere(Sphere::random());
                 }

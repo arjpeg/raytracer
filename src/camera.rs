@@ -11,6 +11,9 @@ pub struct Camera {
     pub yaw: f32,
     /// The euler angle defining rotation around the x axis.
     pub pitch: f32,
+
+    /// Has the camera moved since the last frame.
+    pub moved: bool,
 }
 
 impl Camera {
@@ -24,6 +27,7 @@ impl Camera {
             eye: position,
             yaw,
             pitch,
+            moved: false,
         }
     }
 
@@ -73,6 +77,10 @@ impl Camera {
             delta_pos -= Vec3::Y;
         }
 
+        if delta_pos.length() != 0.0 {
+            self.moved = true;
+        }
+
         delta_pos = delta_pos.normalize_or_zero();
         let speed = 5.0;
         self.eye += speed * dt * delta_pos;
@@ -89,6 +97,10 @@ impl Camera {
             self.pitch -= dy;
 
             self.pitch = self.pitch.clamp(-89.0, 89.0);
+
+            if dx != 0.0 || dy != 0.0 {
+                self.moved = true;
+            }
         }
     }
 }

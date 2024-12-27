@@ -11,7 +11,7 @@ use anyhow::Result;
 use crate::camera::Camera;
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
+#[derive(Debug, Clone, Copy, bytemuck::Zeroable, bytemuck::NoUninit)]
 pub struct RenderUniform {
     pub inverse_projection: glam::Mat4,
     pub inverse_view: glam::Mat4,
@@ -19,6 +19,10 @@ pub struct RenderUniform {
     pub aspect_ratio: f32,
     pub sky_color: glam::Vec3,
     pub time: f32,
+    pub dimensions: glam::UVec2,
+    pub frames_accumulated: u32,
+    pub accumulate: bool,
+    pub padding: [u8; 3],
 }
 
 #[derive(Debug, Clone)]
@@ -34,7 +38,15 @@ pub struct Sphere {
     pub color: glam::Vec3,
     pub radius: f32,
     pub roughness: f32,
-    pub _unused: [u8; 12],
+
+    pub padding: [u8; 12],
+}
+
+#[derive(Debug)]
+pub struct AccumulationBuffer {
+    pub bind_group: wgpu::BindGroup,
+    bind_group_layout: wgpu::BindGroupLayout,
+    buffer: wgpu::Buffer,
 }
 
 pub struct GfxContext {
@@ -55,21 +67,23 @@ pub struct GfxContext {
     /// The main egui renderer.
     egui_renderer: egui_wgpu::Renderer,
 
-    render_data_bind_group: BindGroup,
+    render_data_bind_group: wgpu::BindGroup,
 
     pub render_uniform: RenderUniform,
-    render_uniform_buffer: Buffer,
+    render_uniform_buffer: wgpu::Buffer,
 
     /// A description of the scene to be rendered.
     pub scene: Scene,
-    scene_storage_buffer: Buffer,
+    scene_storage_buffer: wgpu::Buffer,
+
+    accumulation_buffer: AccumulationBuffer,
 }
 
 impl GfxContext {
     /// Creates a new renderer given a window as the surface.
     pub async fn new(window: Arc<Window>, camera: &Camera) -> Result<Self> {
         let instance = Instance::new(InstanceDescriptor {
-            backends: Backends::all(),
+            backends: Backends::PRIMARY,
             flags: InstanceFlags::empty(),
             ..Default::default()
         });
@@ -102,25 +116,26 @@ impl GfxContext {
                     color: vec3(0.0, 0.0, 1.0),
                     radius: 12.0,
                     roughness: 0.3,
-                    _unused: [0; 12],
+                    padding: [0; 12],
                 },
                 Sphere {
                     position: vec4(0.0, 0.6, 0.0, 0.0),
                     color: vec3(1.0, 1.0, 1.0),
                     radius: 0.5,
                     roughness: 0.7,
-                    _unused: [0; 12],
+                    padding: [0; 12],
                 },
                 Sphere {
                     position: vec4(-2.61, 0.0, 3.91, 0.0),
                     color: vec3(1.0, 0.0, 0.0),
                     radius: 2.75,
                     roughness: 0.7,
-                    _unused: [0; 12],
+                    padding: [0; 12],
                 },
             ],
             size_changed: false,
         };
+
         let scene_storage_buffer = scene.create_buffer(&device);
 
         let (render_data_bind_group, render_data_bind_group_layout) =
@@ -130,11 +145,16 @@ impl GfxContext {
                 &scene_storage_buffer,
             );
 
+        let accumulation_buffer = AccumulationBuffer::new(&device, window.inner_size());
+
         let pipeline = Self::create_pipeline(
             &device,
             &surface_config,
             device.create_shader_module(include_wgsl!("shader.wgsl")),
-            &[&render_data_bind_group_layout],
+            &[
+                &render_data_bind_group_layout,
+                &accumulation_buffer.bind_group_layout,
+            ],
         );
 
         let egui_renderer =
@@ -153,6 +173,7 @@ impl GfxContext {
             render_uniform_buffer,
             scene,
             scene_storage_buffer,
+            accumulation_buffer,
         })
     }
 
@@ -250,9 +271,12 @@ impl GfxContext {
         self.surface.configure(&self.device, &self.surface_config);
 
         self.render_uniform.aspect_ratio = width as f32 / height as f32;
+        self.render_uniform.dimensions = uvec2(width, height);
+
+        self.reset_accumulation();
     }
 
-    pub fn update_buffers(&mut self, camera: &Camera) {
+    pub fn update_buffers(&mut self, camera: &mut Camera) {
         let projection = camera.calculate_projection(self.render_uniform.aspect_ratio);
         let view = camera.calculate_view();
 
@@ -260,6 +284,13 @@ impl GfxContext {
         self.render_uniform.inverse_view = view.inverse();
 
         self.render_uniform.time += 0.01;
+        self.render_uniform.frames_accumulated += 1;
+
+        if camera.moved {
+            camera.moved = false;
+
+            self.reset_accumulation();
+        }
 
         if self.scene.size_changed {
             self.scene.size_changed = false;
@@ -334,7 +365,10 @@ impl GfxContext {
         });
 
         render_pass.set_pipeline(&self.pipeline);
+
         render_pass.set_bind_group(0, &self.render_data_bind_group, &[]);
+        render_pass.set_bind_group(1, &self.accumulation_buffer.bind_group, &[]);
+
         render_pass.draw(0..6, 0..1);
     }
 
@@ -439,6 +473,13 @@ impl GfxContext {
 
         (bind_group, bind_group_layout)
     }
+
+    pub fn reset_accumulation(&mut self) {
+        self.accumulation_buffer
+            .reset(&self.device, self.window.inner_size());
+
+        self.render_uniform.frames_accumulated = 1;
+    }
 }
 
 impl RenderUniform {
@@ -448,10 +489,14 @@ impl RenderUniform {
         Self {
             inverse_projection: camera.calculate_projection(aspect_ratio).inverse(),
             inverse_view: camera.calculate_view().inverse(),
-            light_direction: vec3(0.0, -1.0, 0.0).normalize(),
+            light_direction: vec3(-0.25, -0.23, 0.12).normalize(),
             aspect_ratio,
-            sky_color: vec3(0.190, 0.462, 0.709),
+            sky_color: vec3(0.01, 0.01, 0.01),
             time: 0.0,
+            dimensions: uvec2(size.width, size.height),
+            frames_accumulated: 0,
+            accumulate: true,
+            padding: [0; 3],
         }
     }
 
@@ -513,7 +558,66 @@ impl Sphere {
             color,
             radius,
             roughness,
-            _unused: [0; 12],
+            padding: [0; 12],
         }
+    }
+}
+
+impl AccumulationBuffer {
+    fn new(device: &Device, size: PhysicalSize<u32>) -> Self {
+        let buffer_size = Self::calculate_bytes(size);
+
+        let buffer = Self::create_buffer(device, buffer_size);
+
+        let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Accumulation Buffer Bind Group Layout"),
+            entries: &[BindGroupLayoutEntry {
+                binding: 0,
+                visibility: ShaderStages::FRAGMENT,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
+        let bind_group = Self::create_bind_group(device, &bind_group_layout, &buffer);
+
+        Self {
+            bind_group,
+            bind_group_layout,
+            buffer,
+        }
+    }
+
+    fn calculate_bytes(size: PhysicalSize<u32>) -> u64 {
+        size.width as u64 * size.height as u64 * size_of::<Vec4>() as u64
+    }
+
+    fn create_buffer(device: &Device, bytes: u64) -> Buffer {
+        device.create_buffer(&BufferDescriptor {
+            label: Some("Accumulation Storage Buffer"),
+            size: bytes,
+            usage: BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        })
+    }
+
+    fn create_bind_group(device: &Device, layout: &BindGroupLayout, buffer: &Buffer) -> BindGroup {
+        device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Accumulation Buffer Bind Group"),
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+            layout,
+        })
+    }
+
+    fn reset(&mut self, device: &Device, size: PhysicalSize<u32>) {
+        self.buffer = Self::create_buffer(device, Self::calculate_bytes(size));
+        self.bind_group = Self::create_bind_group(device, &self.bind_group_layout, &self.buffer);
     }
 }

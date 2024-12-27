@@ -1,10 +1,14 @@
 struct RenderUniform {
 	inverse_projection: mat4x4<f32>,
 	inverse_view: mat4x4<f32>,
+
 	light_direction: vec3<f32>,
 	aspect_ratio: f32,
 	sky_color: vec3<f32>,
 	time: f32,
+	screen_dimensions: vec2<u32>,
+	frames_accumulated: u32,
+	accumulate: u32,
 }
 
 struct Scene {
@@ -23,6 +27,9 @@ var<uniform> render_info: RenderUniform;
 
 @group(0) @binding(1)
 var<storage> scene: Scene;
+
+@group(1) @binding(0)
+var<storage, read_write> accumulation: array<vec4<f32>>;
 
 struct VertexOutput {
   @builtin(position) clip_position: vec4<f32>,
@@ -52,7 +59,25 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return per_pixel(in.position.xy);
+    let color = per_pixel(in.position.xy);
+
+    if render_info.accumulate != 0 {
+        let index = calculate_index(in.position.xy);
+        accumulation[index] += color;
+
+        return accumulation[index] / f32(render_info.frames_accumulated);
+    }
+
+    return color;
+}
+
+fn calculate_index(coord: vec2<f32>) -> u32 {
+    let screen_dimensions = render_info.screen_dimensions;
+
+		// convert to [0, 1)
+    let normalized_coord = coord * 0.5 + 0.5;
+    let pixel_coord = vec2<u32>(normalized_coord * vec2<f32>(screen_dimensions));
+    return pixel_coord.y * screen_dimensions.x + pixel_coord.x;
 }
 
 struct Ray {
@@ -76,7 +101,7 @@ fn per_pixel(coord: vec2<f32>) -> vec4<f32> {
     let direction = (inverse_view * vec4<f32>(normalize(target_.xyz / target_.w), 0.0)).xyz;
 
     var ray = Ray(origin, direction);
-    let bounces = 5;
+    let bounces = 500000;
 
     var color = vec3<f32>(0.0);
     var multiplier = 1.0;
@@ -106,6 +131,7 @@ fn per_pixel(coord: vec2<f32>) -> vec4<f32> {
 
     return vec4<f32>(color, 1.0);
 }
+
 
 fn trace_ray(ray: Ray) -> HitPayload {
     var closest_sphere = -1;
