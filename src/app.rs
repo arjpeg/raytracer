@@ -14,7 +14,8 @@ use anyhow::Result;
 
 use crate::{
     camera::Camera,
-    gfx_context::{GfxContext, Sphere},
+    gfx_context::GfxContext,
+    scene::{Scene, Sphere},
 };
 
 pub struct App {
@@ -24,6 +25,8 @@ pub struct App {
     gfx_context: GfxContext,
     /// The current camera from which the world is being drawn.
     camera: Camera,
+    /// A descriptor of the scene currently being rendered.
+    scene: Scene,
 
     /// The egui winit side state of the window to manage events.
     egui_state: egui_winit::State,
@@ -55,12 +58,15 @@ impl App {
         let camera = Camera::new_facing(vec3(0.0, 1.0, 4.0), Vec3::NEG_Z);
         let gfx_context = GfxContext::new(Arc::clone(&window), &camera).await?;
 
+        let scene = Scene::new(&gfx_context);
+
         let (egui_ctx, egui_state) = Self::initialize_egui(&window);
 
         Ok(Self {
             gfx_context,
             window,
             camera,
+            scene,
             egui_state,
             egui_ctx,
             egui_enabled: true,
@@ -135,6 +141,7 @@ impl App {
         self.dt = self.last_frame.elapsed().as_secs_f32();
         self.last_frame = Instant::now();
 
+        self.scene.update_buffers(&self.gfx_context);
         self.gfx_context.update_buffers(&mut self.camera);
 
         let hovering = self.egui_ctx.is_pointer_over_area();
@@ -155,7 +162,10 @@ impl App {
             }
         });
 
-        if let Err(e) = self.gfx_context.render(&self.egui_ctx, egui_output) {
+        if let Err(e) = self
+            .gfx_context
+            .render(&self.egui_ctx, egui_output, &self.scene)
+        {
             match e {
                 SE::Timeout => (),
                 SE::OutOfMemory => panic!("out of memory!"),
@@ -227,12 +237,12 @@ impl App {
 
             Window::new("scene").show(ctx, |ui| {
                 if ui.button("add sphere to scene").clicked() {
-                    self.gfx_context.scene.add_sphere(Sphere::random());
+                    self.scene.add_sphere(Sphere::random());
                 }
 
                 ui.separator();
 
-                for sphere in self.gfx_context.scene.spheres_mut() {
+                for sphere in self.scene.spheres_mut() {
                     ui.horizontal(|ui| {
                         let position = &mut sphere.position;
 
@@ -247,6 +257,7 @@ impl App {
                         ui.add(DragValue::new(&mut sphere.radius).speed(0.01));
                     });
 
+                    /*
                     ui.horizontal_top(|ui| {
                         ui.label("roughness: ");
                         ui.add(Slider::new(&mut sphere.roughness, 0.0..=1.0));
@@ -278,6 +289,7 @@ impl App {
                         ui.label("emission strength: ");
                         ui.add(Slider::new(&mut sphere.emmision_strength, 0.0..=1.0));
                     });
+                    */
 
                     ui.separator();
                 }

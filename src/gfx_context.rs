@@ -9,6 +9,7 @@ use winit::{dpi::PhysicalSize, window::Window};
 use anyhow::Result;
 
 use crate::camera::Camera;
+use crate::scene::*;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Zeroable, bytemuck::NoUninit)]
@@ -24,24 +25,6 @@ pub struct RenderUniform {
     pub _padding: [u8; 3],
 }
 
-#[derive(Debug, Clone)]
-pub struct Scene {
-    spheres: Vec<Sphere>,
-    size_changed: bool,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
-pub struct Sphere {
-    pub position: glam::Vec4,
-    pub color: glam::Vec3,
-    pub radius: f32,
-    pub emission_color: glam::Vec3,
-    pub emmision_strength: f32,
-    pub roughness: f32,
-    pub padding: [f32; 3],
-}
-
 #[derive(Debug)]
 pub struct AccumulationBuffer {
     pub bind_group: wgpu::BindGroup,
@@ -51,9 +34,9 @@ pub struct AccumulationBuffer {
 
 pub struct GfxContext {
     /// The actual physical device responsible for rendering things (most likely the GPU).
-    device: wgpu::Device,
+    pub device: wgpu::Device,
     /// The queue of commands being staged to be sent to the `device`.
-    queue: wgpu::Queue,
+    pub queue: wgpu::Queue,
     /// The series of steps that data takes while moving through the rendering process.
     pipeline: wgpu::RenderPipeline,
 
@@ -71,10 +54,6 @@ pub struct GfxContext {
 
     pub render_uniform: RenderUniform,
     render_uniform_buffer: wgpu::Buffer,
-
-    /// A description of the scene to be rendered.
-    pub scene: Scene,
-    scene_storage_buffer: wgpu::Buffer,
 
     accumulation_buffer: AccumulationBuffer,
 }
@@ -118,47 +97,8 @@ impl GfxContext {
         let render_uniform = RenderUniform::new(window.inner_size(), camera);
         let render_uniform_buffer = render_uniform.create_buffer(&device);
 
-        let scene = Scene {
-            spheres: vec![
-                Sphere {
-                    position: vec4(0.0, -12.0, 0.0, 0.0),
-                    color: vec3(0.0, 0.0, 1.0),
-                    radius: 12.0,
-                    roughness: 0.3,
-                    emission_color: vec3(0.0, 0.0, 0.0),
-                    emmision_strength: 0.0,
-                    padding: [0.0; 3],
-                },
-                Sphere {
-                    position: vec4(0.0, 0.6, 0.0, 0.0),
-                    color: vec3(1.0, 1.0, 1.0),
-                    radius: 0.5,
-                    roughness: 0.7,
-                    emission_color: vec3(0.0, 0.0, 0.0),
-                    emmision_strength: 1.0,
-                    padding: [0.0; 3],
-                },
-                Sphere {
-                    position: vec4(-2.61, 0.0, 3.91, 0.0),
-                    color: vec3(1.0, 0.0, 0.0),
-                    radius: 2.75,
-                    roughness: 0.7,
-                    emission_color: vec3(0.0, 0.0, 0.0),
-                    emmision_strength: 0.0,
-                    padding: [0.0; 3],
-                },
-            ],
-            size_changed: false,
-        };
-
-        let scene_storage_buffer = scene.create_buffer(&device);
-
         let (render_data_bind_group, render_data_bind_group_layout) =
-            Self::create_render_data_bind_group(
-                &device,
-                &render_uniform_buffer,
-                &scene_storage_buffer,
-            );
+            Self::create_render_data_bind_group(&device, &render_uniform_buffer);
 
         let accumulation_buffer = AccumulationBuffer::new(&device, window.inner_size());
 
@@ -169,6 +109,7 @@ impl GfxContext {
             &[
                 &render_data_bind_group_layout,
                 &accumulation_buffer.bind_group_layout,
+                &Scene::create_bind_group_layout(&device),
             ],
         );
 
@@ -186,8 +127,6 @@ impl GfxContext {
             render_data_bind_group,
             render_uniform,
             render_uniform_buffer,
-            scene,
-            scene_storage_buffer,
             accumulation_buffer,
         })
     }
@@ -312,24 +251,6 @@ impl GfxContext {
             self.reset_accumulation();
         }
 
-        if self.scene.size_changed {
-            self.scene.size_changed = false;
-            self.scene_storage_buffer = self.scene.create_buffer(&self.device);
-
-            self.render_data_bind_group = Self::create_render_data_bind_group(
-                &self.device,
-                &self.render_uniform_buffer,
-                &self.scene_storage_buffer,
-            )
-            .0;
-        }
-
-        self.queue.write_buffer(
-            &self.scene_storage_buffer,
-            0,
-            bytemuck::cast_slice(&self.scene.spheres),
-        );
-
         self.queue.write_buffer(
             &self.render_uniform_buffer,
             0,
@@ -342,6 +263,7 @@ impl GfxContext {
         &mut self,
         egui_ctx: &egui::Context,
         egui_output: egui::FullOutput,
+        scene: &Scene,
     ) -> Result<(), SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output.texture.create_view(&TextureViewDescriptor {
@@ -355,7 +277,7 @@ impl GfxContext {
                 label: Some("Render Encoder"),
             });
 
-        self.main_render_pass(&mut encoder, &view);
+        self.main_render_pass(&mut encoder, &view, scene);
         self.egui_render_pass(&mut encoder, &view, egui_ctx, egui_output);
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -364,7 +286,7 @@ impl GfxContext {
         Ok(())
     }
 
-    fn main_render_pass(&self, encoder: &mut CommandEncoder, view: &TextureView) {
+    fn main_render_pass(&self, encoder: &mut CommandEncoder, view: &TextureView, scene: &Scene) {
         let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
             label: Some("Render Pass"),
             color_attachments: &[Some(RenderPassColorAttachment {
@@ -388,6 +310,7 @@ impl GfxContext {
 
         render_pass.set_bind_group(0, &self.render_data_bind_group, &[]);
         render_pass.set_bind_group(1, &self.accumulation_buffer.bind_group, &[]);
+        render_pass.set_bind_group(2, &scene.bind_group(), &[]);
 
         render_pass.draw(0..6, 0..1);
     }
@@ -448,47 +371,28 @@ impl GfxContext {
     fn create_render_data_bind_group(
         device: &Device,
         uniform_buffer: &Buffer,
-        storage_buffer: &Buffer,
     ) -> (BindGroup, BindGroupLayout) {
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Render Information Bind Group Layout"),
-            entries: &[
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
+            entries: &[BindGroupLayoutEntry {
+                binding: 0,
+                visibility: ShaderStages::FRAGMENT,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
                 },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
+                count: None,
+            }],
         });
 
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("Render Information Bind Group"),
             layout: &bind_group_layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffer.as_entire_binding(),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: storage_buffer.as_entire_binding(),
-                },
-            ],
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
         });
 
         (bind_group, bind_group_layout)
@@ -526,65 +430,6 @@ impl RenderUniform {
             contents: bytemuck::cast_slice(&[*self]),
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         })
-    }
-}
-
-#[allow(dead_code)]
-impl Scene {
-    fn create_buffer(&self, device: &Device) -> Buffer {
-        device.create_buffer_init(&BufferInitDescriptor {
-            label: Some("Scene Storage Buffer"),
-            contents: bytemuck::cast_slice(&self.spheres),
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-        })
-    }
-
-    pub fn add_sphere(&mut self, sphere: Sphere) {
-        self.spheres.push(sphere);
-        self.size_changed = true;
-    }
-
-    pub fn spheres(&self) -> &[Sphere] {
-        &self.spheres
-    }
-
-    pub fn spheres_mut(&mut self) -> &mut [Sphere] {
-        &mut self.spheres
-    }
-}
-
-impl Sphere {
-    pub fn random() -> Self {
-        use glam::{vec3, vec4};
-        use rand::Rng;
-
-        let mut rng = rand::thread_rng();
-
-        let position = vec4(
-            rng.gen_range(-5.0..5.0),
-            rng.gen_range(-5.0..5.0),
-            rng.gen_range(-5.0..5.0),
-            0.0,
-        );
-
-        let color = vec3(rng.gen(), rng.gen(), rng.gen());
-
-        let radius = rng.gen_range(0.3..1.2);
-
-        let roughness = rng.gen();
-
-        let emission_color = vec3(rng.gen(), rng.gen(), rng.gen());
-        let emmision_strength = rng.gen();
-
-        Self {
-            position,
-            color,
-            radius,
-            roughness,
-            emission_color,
-            emmision_strength,
-            padding: [0.0; 3],
-        }
     }
 }
 

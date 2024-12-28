@@ -1,6 +1,7 @@
 mod app;
 mod camera;
 mod gfx_context;
+mod scene;
 
 use anyhow::Result;
 use app::AppHandler;

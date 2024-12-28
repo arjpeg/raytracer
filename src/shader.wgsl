@@ -9,28 +9,31 @@ struct RenderUniform {
 	accumulate: u32,
 }
 
-struct Scene {
-	spheres: array<Sphere>,
-}
-
 struct Sphere {
 	position: vec4<f32>,
-	albedo: vec3<f32>,
 	radius: f32,
-	emission_color: vec3<f32>,
-	emission_strength: f32,
-	roughness: f32,
+	material_index: u32,
 }
 
+struct Material {
+	albedo: vec3<f32>,
+	roughness: f32,
+	emission_color: vec3<f32>,
+	emission_strength: f32,
+}
 
 @group(0) @binding(0)
 var<uniform> render_info: RenderUniform;
 
-@group(0) @binding(1)
-var<storage> scene: Scene;
-
 @group(1) @binding(0)
 var<storage, read_write> accumulation: array<vec4<f32>>;
+
+@group(2) @binding(0)
+var<storage> spheres: array<Sphere>;
+
+@group(2) @binding(1)
+var<storage> materials: array<Material>;
+
 
 struct VertexOutput {
   @builtin(position) clip_position: vec4<f32>,
@@ -117,10 +120,11 @@ fn per_pixel(coord: vec2<f32>) -> vec4<f32> {
 						break;
         }
 
-        let sphere = scene.spheres[hit.object_index];
+        let sphere = spheres[hit.object_index];
+        let material = materials[sphere.material_index];
 
-        contribution *= sphere.albedo;
-        light += sphere.emission_color * sphere.emission_strength;
+        contribution *= material.albedo;
+        light += material.emission_color * material.emission_strength;
 
         let scatter_direction = next_random_vec3(&rng);
 
@@ -136,8 +140,8 @@ fn trace_ray(ray: Ray) -> HitPayload {
     var closest_sphere = -1;
     var hit_distance = bitcast<f32>(0x7f800000);
 
-    for (var i = 0; i < i32(arrayLength(&scene.spheres)); i++) {
-        let sphere = scene.spheres[i];
+    for (var i = 0; i < i32(arrayLength(&spheres)); i++) {
+        let sphere = spheres[i];
 
         let origin = ray.origin - sphere.position.xyz;
 
@@ -172,7 +176,7 @@ fn closest_hit(ray: Ray, hit_distance: f32, object_index: u32) -> HitPayload {
     payload.hit_distance = hit_distance;
     payload.object_index = object_index;
 
-    let sphere = scene.spheres[object_index];
+    let sphere = spheres[object_index];
     let origin = ray.origin - sphere.position.xyz;
 
     payload.position = origin + ray.direction * hit_distance;
