@@ -2,8 +2,6 @@ struct RenderUniform {
 	inverse_projection: mat4x4<f32>,
 	inverse_view: mat4x4<f32>,
 
-	light_direction: vec3<f32>,
-	aspect_ratio: f32,
 	sky_color: vec3<f32>,
 	time: f32,
 	screen_dimensions: vec2<u32>,
@@ -19,8 +17,11 @@ struct Sphere {
 	position: vec4<f32>,
 	albedo: vec3<f32>,
 	radius: f32,
+	emission_color: vec3<f32>,
+	emission_strength: f32,
 	roughness: f32,
 }
+
 
 @group(0) @binding(0)
 var<uniform> render_info: RenderUniform;
@@ -101,10 +102,10 @@ fn per_pixel(coord: vec2<f32>) -> vec4<f32> {
     let direction = (inverse_view * vec4<f32>(normalize(target_.xyz / target_.w), 0.0)).xyz;
 
     var ray = Ray(origin, direction);
-    let bounces = 500000;
+    let bounces = 5;
 
-    var color = vec3<f32>(0.0);
-    var multiplier = 1.0;
+    var light = vec3<f32>(0.0);
+    var contribution = vec3<f32>(1.0);
 
     var rng = initial_seed(coord);
 
@@ -112,24 +113,22 @@ fn per_pixel(coord: vec2<f32>) -> vec4<f32> {
         let hit = trace_ray(ray);
 
         if hit.hit_distance < 0.0 {
-            color += render_info.sky_color * multiplier;
+            light += render_info.sky_color * contribution;
 						break;
         }
 
         let sphere = scene.spheres[hit.object_index];
 
-        let light_intensity = max(dot(hit.normal, -normalize(render_info.light_direction)), 0.01);
-        color += sphere.albedo * light_intensity;
+        contribution *= sphere.albedo;
+        light += sphere.emission_color * sphere.emission_strength;
 
-        let scatter_direction = next_random_vec3(&rng) - vec3<f32>(0.5);
+        let scatter_direction = next_random_vec3(&rng);
 
         ray.origin = hit.position + hit.normal * 0.0001;
-        ray.direction = reflect(ray.direction, hit.normal + sphere.roughness * scatter_direction);
-
-        multiplier *= 0.5;
+        ray.direction = normalize(hit.normal + scatter_direction);
     }
 
-    return vec4<f32>(color, 1.0);
+    return vec4<f32>(light, 1.0);
 }
 
 

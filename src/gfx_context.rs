@@ -15,14 +15,13 @@ use crate::camera::Camera;
 pub struct RenderUniform {
     pub inverse_projection: glam::Mat4,
     pub inverse_view: glam::Mat4,
-    pub light_direction: glam::Vec3,
-    pub aspect_ratio: f32,
     pub sky_color: glam::Vec3,
     pub time: f32,
     pub dimensions: glam::UVec2,
     pub frames_accumulated: u32,
     pub accumulate: bool,
-    pub padding: [u8; 3],
+
+    pub _padding: [u8; 3],
 }
 
 #[derive(Debug, Clone)]
@@ -37,9 +36,10 @@ pub struct Sphere {
     pub position: glam::Vec4,
     pub color: glam::Vec3,
     pub radius: f32,
+    pub emission_color: glam::Vec3,
+    pub emmision_strength: f32,
     pub roughness: f32,
-
-    pub padding: [u8; 12],
+    pub padding: [f32; 3],
 }
 
 #[derive(Debug)]
@@ -100,7 +100,16 @@ impl GfxContext {
             .unwrap();
 
         let (device, queue) = adapter
-            .request_device(&DeviceDescriptor::default(), None)
+            .request_device(
+                &DeviceDescriptor {
+                    required_limits: Limits {
+                        max_storage_buffer_binding_size: 256000000,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                None,
+            )
             .await?;
 
         let surface_config = Self::get_surface_config(&adapter, &surface, window.inner_size());
@@ -116,21 +125,27 @@ impl GfxContext {
                     color: vec3(0.0, 0.0, 1.0),
                     radius: 12.0,
                     roughness: 0.3,
-                    padding: [0; 12],
+                    emission_color: vec3(0.0, 0.0, 0.0),
+                    emmision_strength: 0.0,
+                    padding: [0.0; 3],
                 },
                 Sphere {
                     position: vec4(0.0, 0.6, 0.0, 0.0),
                     color: vec3(1.0, 1.0, 1.0),
                     radius: 0.5,
                     roughness: 0.7,
-                    padding: [0; 12],
+                    emission_color: vec3(0.0, 0.0, 0.0),
+                    emmision_strength: 1.0,
+                    padding: [0.0; 3],
                 },
                 Sphere {
                     position: vec4(-2.61, 0.0, 3.91, 0.0),
                     color: vec3(1.0, 0.0, 0.0),
                     radius: 2.75,
                     roughness: 0.7,
-                    padding: [0; 12],
+                    emission_color: vec3(0.0, 0.0, 0.0),
+                    emmision_strength: 0.0,
+                    padding: [0.0; 3],
                 },
             ],
             size_changed: false,
@@ -270,14 +285,19 @@ impl GfxContext {
 
         self.surface.configure(&self.device, &self.surface_config);
 
-        self.render_uniform.aspect_ratio = width as f32 / height as f32;
         self.render_uniform.dimensions = uvec2(width, height);
 
         self.reset_accumulation();
     }
 
     pub fn update_buffers(&mut self, camera: &mut Camera) {
-        let projection = camera.calculate_projection(self.render_uniform.aspect_ratio);
+        let aspect_ratio = {
+            let PhysicalSize { width, height } = self.window.inner_size();
+
+            width as f32 / height as f32
+        };
+
+        let projection = camera.calculate_projection(aspect_ratio);
         let view = camera.calculate_view();
 
         self.render_uniform.inverse_projection = projection.inverse();
@@ -484,19 +504,19 @@ impl GfxContext {
 
 impl RenderUniform {
     fn new(size: PhysicalSize<u32>, camera: &Camera) -> Self {
-        let aspect_ratio = size.width as f32 / size.height as f32;
+        let PhysicalSize { width, height } = size;
 
         Self {
-            inverse_projection: camera.calculate_projection(aspect_ratio).inverse(),
+            inverse_projection: camera
+                .calculate_projection(width as f32 / height as f32)
+                .inverse(),
             inverse_view: camera.calculate_view().inverse(),
-            light_direction: vec3(-0.25, -0.23, 0.12).normalize(),
-            aspect_ratio,
             sky_color: vec3(0.01, 0.01, 0.01),
             time: 0.0,
             dimensions: uvec2(size.width, size.height),
             frames_accumulated: 0,
             accumulate: true,
-            padding: [0; 3],
+            _padding: [0; 3],
         }
     }
 
@@ -553,12 +573,17 @@ impl Sphere {
 
         let roughness = rng.gen();
 
+        let emission_color = vec3(rng.gen(), rng.gen(), rng.gen());
+        let emmision_strength = rng.gen();
+
         Self {
             position,
             color,
             radius,
             roughness,
-            padding: [0; 12],
+            emission_color,
+            emmision_strength,
+            padding: [0.0; 3],
         }
     }
 }

@@ -4,8 +4,9 @@ use glam::Vec3;
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::{DeviceEvent, DeviceId, WindowEvent},
+    event::{DeviceEvent, DeviceId, ElementState, KeyEvent, WindowEvent},
     event_loop::ActiveEventLoop,
+    keyboard::{KeyCode, PhysicalKey},
     window::{CursorGrabMode, Window, WindowId},
 };
 
@@ -28,6 +29,8 @@ pub struct App {
     egui_state: egui_winit::State,
     /// The actual egui context to render ui.
     egui_ctx: egui::Context,
+    /// If the egui display is currently enabled.
+    egui_enabled: bool,
 
     /// The time in seconds since the last frame, also known as delta time.
     dt: f32,
@@ -60,6 +63,7 @@ impl App {
             camera,
             egui_state,
             egui_ctx,
+            egui_enabled: true,
             dt: 0.0,
             last_frame: Instant::now(),
             focused: false,
@@ -88,6 +92,18 @@ impl App {
         match event {
             WE::RedrawRequested => {
                 self.update();
+            }
+
+            WE::KeyboardInput {
+                event:
+                    KeyEvent {
+                        physical_key: PhysicalKey::Code(KeyCode::KeyG),
+                        state: ElementState::Pressed,
+                        ..
+                    },
+                ..
+            } => {
+                self.egui_enabled = !self.egui_enabled;
             }
 
             WE::Resized(size) => self.gfx_context.resize(size),
@@ -155,6 +171,10 @@ impl App {
 
         let raw_input = self.egui_state.take_egui_input(&self.window);
 
+        if !self.egui_enabled {
+            return self.egui_ctx.run(raw_input, |_| {});
+        }
+
         self.egui_ctx.run(raw_input, |ctx| {
             Window::new("render info").show(ctx, |ui| {
                 ui.label(&format!("frame time: {:0.3}", self.dt * 1000.0));
@@ -174,15 +194,6 @@ impl App {
                     ui.label("camera forward: ");
                     ui.add(DragValue::new(&mut self.camera.yaw).speed(0.1));
                     ui.add(DragValue::new(&mut self.camera.pitch).speed(0.1));
-                });
-
-                ui.horizontal(|ui| {
-                    let direction = &mut self.gfx_context.render_uniform.light_direction;
-
-                    ui.label("light direction: ");
-                    ui.add(DragValue::new(&mut direction.x).speed(0.01));
-                    ui.add(DragValue::new(&mut direction.y).speed(0.01));
-                    ui.add(DragValue::new(&mut direction.z).speed(0.01));
                 });
 
                 ui.separator();
@@ -251,6 +262,21 @@ impl App {
                         color.x = color_array[0];
                         color.y = color_array[1];
                         color.z = color_array[2];
+                    });
+
+                    ui.horizontal(|ui| {
+                        let color = &mut sphere.emission_color;
+                        let mut color_array = color.to_array();
+
+                        ui.label("emmision color: ");
+                        ui.color_edit_button_rgb(&mut color_array);
+
+                        color.x = color_array[0];
+                        color.y = color_array[1];
+                        color.z = color_array[2];
+
+                        ui.label("emission strength: ");
+                        ui.add(Slider::new(&mut sphere.emmision_strength, 0.0..=1.0));
                     });
 
                     ui.separator();

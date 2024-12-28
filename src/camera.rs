@@ -82,7 +82,13 @@ impl Camera {
         }
 
         delta_pos = delta_pos.normalize_or_zero();
-        let speed = 5.0;
+
+        let speed = if input.modifiers.contains(Modifiers::CTRL) {
+            1.0
+        } else {
+            5.0
+        };
+
         self.eye += speed * dt * delta_pos;
     }
 
