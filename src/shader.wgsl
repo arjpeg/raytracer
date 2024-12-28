@@ -126,7 +126,7 @@ fn per_pixel(coord: vec2<f32>) -> vec4<f32> {
         contribution *= material.albedo;
         light += material.emission_color * material.emission_strength;
 
-        let scatter_direction = next_random_vec3(&rng);
+        let scatter_direction = next_random_vec3(&rng) * material.roughness;
 
         ray.origin = hit.position + hit.normal * 0.0001;
         ray.direction = normalize(hit.normal + scatter_direction);

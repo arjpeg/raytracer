@@ -15,7 +15,7 @@ use anyhow::Result;
 use crate::{
     camera::Camera,
     gfx_context::GfxContext,
-    scene::{Scene, Sphere},
+    scene::{Material, Scene, Sphere},
 };
 
 pub struct App {
@@ -235,12 +235,14 @@ impl App {
                 });
             });
 
-            Window::new("scene").show(ctx, |ui| {
+            Window::new("spheres").show(ctx, |ui| {
                 if ui.button("add sphere to scene").clicked() {
                     self.scene.add_sphere(Sphere::random());
                 }
 
                 ui.separator();
+
+                let materials_len = self.scene.materials_mut().len() as u32 - 1;
 
                 for sphere in self.scene.spheres_mut() {
                     ui.horizontal(|ui| {
@@ -257,14 +259,30 @@ impl App {
                         ui.add(DragValue::new(&mut sphere.radius).speed(0.01));
                     });
 
-                    /*
-                    ui.horizontal_top(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("material index: ");
+                        ui.add(Slider::new(&mut sphere.material_index, 0..=materials_len));
+                    });
+
+                    ui.separator();
+                }
+            });
+
+            Window::new("materials").show(ctx, |ui| {
+                if ui.button("add material to scene").clicked() {
+                    self.scene.add_material(Material::random());
+                }
+
+                ui.separator();
+
+                for mat in self.scene.materials_mut() {
+                    ui.horizontal(|ui| {
                         ui.label("roughness: ");
-                        ui.add(Slider::new(&mut sphere.roughness, 0.0..=1.0));
+                        ui.add(Slider::new(&mut mat.roughness, 0.0..=1.0));
                     });
 
                     ui.horizontal(|ui| {
-                        let color = &mut sphere.color;
+                        let color = &mut mat.albedo;
                         let mut color_array = color.to_array();
 
                         ui.label("albedo: ");
@@ -276,7 +294,7 @@ impl App {
                     });
 
                     ui.horizontal(|ui| {
-                        let color = &mut sphere.emission_color;
+                        let color = &mut mat.emission_color;
                         let mut color_array = color.to_array();
 
                         ui.label("emmision color: ");
@@ -285,12 +303,12 @@ impl App {
                         color.x = color_array[0];
                         color.y = color_array[1];
                         color.z = color_array[2];
-
-                        ui.label("emission strength: ");
-                        ui.add(Slider::new(&mut sphere.emmision_strength, 0.0..=1.0));
                     });
-                    */
 
+                    ui.horizontal(|ui| {
+                        ui.label("emission strength: ");
+                        ui.add(Slider::new(&mut mat.emission_strength, 0.0..=1.0));
+                    });
                     ui.separator();
                 }
             });

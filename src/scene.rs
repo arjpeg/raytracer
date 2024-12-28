@@ -95,8 +95,17 @@ impl Scene {
         self.spheres_size_changed = true;
     }
 
+    pub fn add_material(&mut self, material: Material) {
+        self.materials.push(material);
+        self.materials_size_changed = true;
+    }
+
     pub fn spheres_mut(&mut self) -> &mut [Sphere] {
         &mut self.spheres
+    }
+
+    pub fn materials_mut(&mut self) -> &mut [Material] {
+        &mut self.materials
     }
 
     pub fn update_buffers(&mut self, gfx_context: &GfxContext) {
@@ -217,7 +226,7 @@ impl Scene {
 impl Sphere {
     /// Creates a new [`Sphere`], with a random position and radius and a material referencing the
     /// first material in the [`Scene`].
-    pub fn random() -> Sphere {
+    pub fn random() -> Self {
         use glam::vec4;
         use rand::Rng;
 
@@ -231,11 +240,28 @@ impl Sphere {
         );
         let radius = rng.gen_range(0.3..1.2);
 
-        Sphere {
+        Self {
             position,
             radius,
             material_index: 0,
             padding: [0; 2],
+        }
+    }
+}
+
+impl Material {
+    /// Creates a new [`Sphere`], with a random attributes.
+    pub fn random() -> Self {
+        use glam::vec3;
+        use rand::Rng;
+
+        let mut rng = rand::thread_rng();
+
+        Self {
+            albedo: vec3(rng.gen(), rng.gen(), rng.gen()),
+            roughness: rng.gen(),
+            emission_color: vec3(rng.gen(), rng.gen(), rng.gen()),
+            emission_strength: rng.gen(),
         }
     }
 }
